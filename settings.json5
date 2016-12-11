@@ -28,6 +28,13 @@
         description: "if you want SMS notifications, fill this in with your phone number (it's your cell#, domain differs for each carrier, ex: 5551234567@vtext.com for verizon, or 5551234567@txt.att.net for at&t)",
       }
     },
+    can: {
+      editable: true,
+      exposed: true,
+      device: {
+        value: "can0"
+      }
+    },
     serial: {
       editable: true,
       exposed: true,

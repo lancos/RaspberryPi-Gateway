@@ -1,4 +1,4 @@
-﻿// **********************************************************************************
+// **********************************************************************************
 // Websocket server backend for the Moteino IoT Gateway
 // Hardware and software stack details: http://lowpowerlab.com/gateway
 // This is a work in progress and is released without any warranties expressed or implied.
@@ -37,14 +37,50 @@ var userMetricsDir = 'userMetrics';
 nconf.argv().file({ file: path.resolve(__dirname, 'settings.json5'), format: JSON5 });
 settings = nconf.get('settings');
 var dbLog = require(path.resolve(__dirname,'logUtil.js'));
-io = require('socket.io').listen(settings.general.socketPort.value);
-var serialport = require("serialport");                         //https://github.com/voodootikigod/node-serialport
+var io = require('socket.io').listen(settings.general.socketPort.value);
+var serialport = require('serialport');                         //https://github.com/voodootikigod/node-serialport
 var Datastore = require('nedb');                                //https://github.com/louischatriot/nedb
 var nodemailer = require('nodemailer');                         //https://github.com/andris9/Nodemailer
 var request = require('request');
 db = new Datastore({ filename: path.join(__dirname, dbDir, settings.database.name.value), autoload: true });       //used to keep all node/metric data
 var dbunmatched = new Datastore({ filename: path.join(__dirname, dbDir, settings.database.nonMatchesName.value), autoload: true });
-serial = new serialport.SerialPort(settings.serial.port.value, { baudrate : settings.serial.baud.value, parser: serialport.parsers.readline("\n") }, false);
+serial = new serialport(settings.serial.port.value, { baudrate : settings.serial.baud.value, parser: serialport.parsers.readline("\n"), autoOpen: false });
+var can = require('socketcan');
+console.log("socketcan ---> ok");
+var candev = can.createRawChannel(settings.can.device.value, false);
+// Log any message
+candev.addListener("onMessage", function(msg) { console.log('CAN ' + msg); });
+
+// ID
+// X X X X X             function code
+//           X X X X X X node select (0 invalid)
+function canAddressToId(node, funct)
+{
+    var id = 0;
+    id = ((funct & 0x1f) << 6) | (node & 0x3f);
+}
+
+function canIdToNode(id)
+{
+    var node = 0;
+	node = id & 0x3f;
+    return node;
+}
+
+function canIdToFunction(id)
+{
+    var funct = 0;
+	funct = (id >> 6) & 0x1f;
+    return funct;
+}
+
+function canSendPacket(node, funct, data_buf)
+{
+    var canid = canAddressToId(node, funct);
+    candev.send({id:canid, ext:false, data: data_buf}); 
+    console.log('Can spedito Node:' + node + ', Func:' + funct + ', Data:' + data_buf);
+}  
+
 
 serial.on('error', function serialErrorHandler(error) {
   //Send serial error messages to console. Better error handling needs to be here in the future.
