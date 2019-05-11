@@ -1,5 +1,5 @@
 ﻿// **********************************************************************************
-// Websocket backend for the Moteino IoT Framework
+// Websocket backend for the Moteino IoT Gateway
 // http://lowpowerlab.com/gateway
 // **********************************************************************************
 // This is the metrics definitions file containing the definitions of token matches
@@ -10,18 +10,33 @@
 // This is a work in progress and updates and fixes will be added as they come up
 // and time permits. Contributions are encouraged.
 // ********************************************************************************************
-// Copyright Felix Rusu, Low Power Lab LLC (2015), http://lowpowerlab.com/contact
+// Copyright Felix Rusu, Low Power Lab LLC (2018), http://lowpowerlab.com/contact
 // ********************************************************************************************
 // Great reference on Javascript Arrays: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array
 // Great reference on Javascript Objects: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Working_with_Objects
 // Great reference on Javascript Regular Expressions: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions
 // Great sandbox to test your Regular Expressions: http://regexr.com/
 // JqueryMobile generic icons: http://api.jquerymobile.com/icons/
-// FLOT graphs customizations: http://www.jqueryflottutorial.com/jquery-flot-customizing-data-series-format.html
+// FLOT graphs API & customizations: https://github.com/flot/flot/blob/master/API.md
+//                                   http://www.jqueryflottutorial.com/jquery-flot-customizing-data-series-format.html
+var request = require('request');
+var config = require('nconf');
+var JSON5 = require('json5');
+var suncalc = require('suncalc'); //https://github.com/mourner/suncalc
+config.argv().file({ file: require('path').resolve(__dirname, 'settings.json5'), format: JSON5 });
+var settings = config.get('settings'); //these are local to avoid runtime errors but in events they will reference the global settings declared in gateway.js
+
 // ******************************************************************************************************************************************
-//                                            SAMPLE EVENTS/ALERTS
+//                                            SAMPLE METRICS DEFINITIONS
 // ******************************************************************************************************************************************
-// These metrics definitions consist of a regular expression that will be attempted to be matched to any incoming tokens from the gateway Moteino serial port
+// The metrics definitions use [regular expressions] to match an incoming metric token
+// The metrics tokens have a pattern that must be followed:
+// - a packet received from a node can contain multiple metrics (ie temperature, humidity, motion etc.)
+// - metrics are separated by space (not by comma, or other characters, ex:  "T:42 H:50")
+// - each metric that has a name/value pair is defined as NAME:VALUE (metric name, colon, metric value)
+// - each metric that simply defines a status can be standalone without a value (ex: "MOTION")
+// ******************************************************************************************************************************************
+// These metrics definitions consist of a regular expression that will be attempted to be matched to any incoming tokens from the gateway (ie. Moteino, MightyHat, etc.) serial port
 // If one matches you should see a new node/metric show up in the UI or be updated if previously matched
 // Other parameters:
 //     - value - this can be hardcoded, or if left blank the value will be the first captured parentheses from the regex expression
@@ -34,18 +49,13 @@
 //                    - it should only be specified one per each metric - the first one (ie one for each set of metrics that have multiple entries with same 'name') - ex: GarageMote 'Status' metric
 //                    - this object is overlapped over the default 'graphOptions' defined in index.html
 //                    - for more details how to customize FLOT graphs see this: http://www.jqueryflottutorial.com/jquery-flot-customizing-data-series-format.html
+// ******************************************************************************************************************************************
 // Important Notes:
-//     - the same node can have any number of metrics
+//     - the same node can have any number of metrics (only limited by the packet max length - ex. 61 chars in the RFM69 library)
 //     - each related metric should have the same name - for instance look at GarageMote - all the regex expressions actually update the same metric specified by name='Status'
 //       so when garage goes through different states it will update a single metric called 'Status'
 //       Another good example is SwitchMote where we have 6 different metric definitions here but only 3 resultant actual metrics (Button1, Button2 and Button3)
-var request = require('request');
-var config = require('nconf');
-var JSON5 = require('json5');
-var suncalc = require('suncalc'); //https://github.com/mourner/suncalc
-config.argv().file({ file: require('path').resolve(__dirname, 'settings.json5'), format: JSON5 });
-var settings = config.get('settings'); //these are local to avoid runtime errors but in events they will reference the global settings declared in gateway.js
-
+// ******************************************************************************************************************************************
 exports.metrics = {
   //GarageMote
   //NOTE the \b word boundary is used to avoid matching "OPENING" (ie OPEN must be followed by word boundary/end of word)
@@ -56,7 +66,7 @@ exports.metrics = {
   unknown : { name:'Status', regexp:/(?:STS\:)?(UNK|UNKNOWN)/i, value:'UNKNOWN!', pin:1, graph:1, logValue:0.5 },
 
   //MotionMote and Mailbox notifier
-  motion : { name:'M', regexp:/\bMOTION\b/i, value:'MOTION', pin:1, graph:1, logValue:1, graphValSuffix:' detected!', graphOptions:{ legendLbl:'Motion', lines: { show:false, fill:false }, points: { show: true, radius: 5, lineWidth:1 }, grid: { backgroundColor: {colors:['#000', '#03c', '#08c']}}, yaxis: { ticks: 0 }}},
+  motion : { name:'M', regexp:/\bMOTION\b/i, value:'MOTION', pin:1, graph:1, logValue:1, graphValSuffix:' detected!', graphOptions:{ legendLbl:'Motion', lines: { show:false, fill:false }, points: { show:true, radius:8, fill:false }, grid: { backgroundColor: {colors:['#000', '#03c', '#08c']}}, yaxis: { ticks: 0 }}},
   lastMotion : { name:'LO', regexp:/(?:LO|LM)\:((?:\d+h)?\d{1,2}m|\d{1,2}s)/i, value:'', pin:1 },
   debug : { name:'DEBUG', regexp:/\[(?:DEBUG)\:([^\]]+)\]/i, value:''},
 
@@ -69,17 +79,16 @@ exports.metrics = {
   SMB2_ON  : { name:'B2', regexp:/BTN2\:1/i, value:'ON'},
 
   //Door Bell Mote
-  ring : { name:'RING', regexp:/\bRING\b/i, value:'RING', pin:1, graph:1, logValue:1, graphValSuffix:'!', graphOptions:{ legendLbl:'Doorbell rings', lines: { show:false, fill:false }, points: { show: true, radius: 5,  lineWidth:1 }, grid: { backgroundColor: {colors:['#000', '#a40']}}, yaxis: { ticks: 0 }}},
+  ring : { name:'RING', regexp:/\bRING\b/i, value:'RING', pin:1, graph:1, logValue:1, graphValSuffix:'!', graphOptions:{ legendLbl:'Doorbell rings', lines: { show:false, fill:false }, points: { show:true, radius:8, fill:false }, grid: { backgroundColor: {colors:['#000', '#a40']}}, yaxis: { ticks: 0 }}},
   BELL_DISABLED : { name:'Status', regexp:/\bBELL\:0\b/i, value:'OFF'},
   BELL_ENABLED  : { name:'Status', regexp:/\bBELL\:1\b/i, value:'ON'},
-  START         : { name:'START', regexp:/\bSTART\b/i, value:'Started'},
 
   //WeatherShield metrics
   //uncomment FtoC if you want a F:1234 to be valuated as a Centigrade isntead of F (the first match is picked up and will evaluate, any following defs are ignored)
-  //FtoC : { name:'C', regexp:/F\:(-?\d+\.\d+)/i, value:'', duplicateInterval:3600, valuation:function(value) {return (value - 32) * 5/9;}, unit:'°', pin:1, graph:1, graphValSuffix:'C', graphOptions:{ legendLbl:'Temperature', lines: { lineWidth:1 }}}
+  //FtoC : { name:'C', regexp:/F\:(-?\d+\.\d+)/i, value:'', duplicateInterval:3600, valuation:function(value) {return ((value - 32) * 5/9).toFixed(2);}, unit:'°', pin:1, graph:1, graphValSuffix:'C', graphOptions:{ legendLbl:'Temperature', lines: { lineWidth:1 }}},
   F : { name:'F', regexp:/\bF\:(-?\d+\.\d+)\b/i, value:'', duplicateInterval:3600, unit:'°', pin:1, graph:1, graphValSuffix:'F', graphOptions:{ legendLbl:'Temperature', lines: { lineWidth:1 } }},
   //uncomment FHtoC if you want a F:1234 to be valuated as a Centigrade isntead of F (the first match is picked up and will evaluate, any following defs are ignored)
-  //FHtoC : { name:'C', regexp:/\bF\:(-?\d+)\b/i, value:'', duplicateInterval:3600, valuation:function(value) {return (value/100 - 32) * 5/9;}, unit:'°', pin:1, graph:1, graphValSuffix:'C', graphOptions:{ legendLbl:'Temperature', lines: { lineWidth:1 }}}
+  //FHtoC : { name:'C', regexp:/\bF\:(-?\d+)\b/i, value:'', duplicateInterval:3600, valuation:function(value) {return ((value/100 - 32) * 5/9).toFixed(2);}, unit:'°', pin:1, graph:1, graphValSuffix:'C', graphOptions:{ legendLbl:'Temperature', lines: { lineWidth:1 }}}
   FH : { name:'F', regexp:/\bF\:(-?\d+)\b/i, value:'', duplicateInterval:3600, valuation:function(value) {return value/100;}, unit:'°', pin:1, graph:1, graphValSuffix:'F', graphOptions:{ legendLbl:'Temperature', lines: { lineWidth:1 }}},
   C : { name:'C', regexp:/\bC\:([-\d\.]+)\b/i, value:'', duplicateInterval:3600, unit:'°', pin:1, graph:1, graphValSuffix:'C', graphOptions:{ legendLbl:'Temperature' }},
   H : { name:'H', regexp:/\bH\:([\d\.]+)\b/i, value:'', duplicateInterval:3600, unit:'%', pin:1, graph:1, graphOptions:{ legendLbl:'Humidity', lines: { lineWidth:1 }}},
@@ -98,7 +107,7 @@ exports.metrics = {
   WATT : { name:'W', regexp:/W\:([\d\.]+)(?:W)/i, value:'', unit:'W', pin:1, },
 
   //WaterMote
-  GPM : { name:'GPM', regexp:/GPM\:([\d\.]+)/i, value:'', unit:'gpm', graph:1,  graphOptions : { legendLbl:'Gallons/min', lines: { lineWidth:1 }, colors:['#09c'],  /*yaxis: { ticks: [1,5,20], transform:  function(v) {return v==0?v:Math.log(v); //log scale },*/ tickDecimals: 2} },
+  GPM : { name:'GPM', regexp:/GPM\:([\d\.]+)/i, value:'', unit:'gpm', graph:1,  graphOptions : { legendLbl:'Gallons/min', lines: { lineWidth:1 }, colors:['#09c'], tickDecimals: 2} },
   GLM : { name:'GLM', regexp:/GLM\:([\d\.]+)/i, value:'', unit:'glm', },
   GAL : { name:'GAL', regexp:/GAL\:([\d\.]+)/i, value:'', unit:'gal', pin:1, },
 
@@ -110,8 +119,13 @@ exports.metrics = {
   FSTATE : { name:'FSTATE', regexp:/FSTATE\:(AUTO|AUTOCIRC|ON)/i, value:''},
 
   //special metrics
-  V : { name:'V', regexp:/\b(?:V?BAT|VOLTS|V)\:([\d\.]+)v?\b/i, value:'', duplicateInterval:3600, unit:'v', graph:1, graphOptions:{ legendLbl:'Voltage', lines: { fill:true, lineWidth:1 }, grid: { backgroundColor: {colors:['#000', '#03c', '#08c']}}, yaxis: { min: 0, autoscaleMargin: 0.25, autoscaleBottom:false }}},
-  RSSI : { name:'RSSI', regexp:/\[(?:RSSI|SS)\:(-?\d+)[^\s]*\]/i, value:'', duplicateInterval:3600, unit:'db', graph:1, graphOptions:{ legendLbl:'Signal strength', lines: { fill:true, lineWidth:1 }, grid: { backgroundColor: {colors:['#000', '#03c', '#08c']}}, yaxis: { min:-100, max:-20 }}},
+  V : { name:'V', regexp:/\b(?:V?BAT|VOLTS|V)\:([\d\.]+)v?\b/i, value:'', duplicateInterval:3600, unit:'v', graph:1, graphOptions:{ legendLbl:'Voltage', lines: { lineWidth:1 }, grid: { backgroundColor: {colors:['#000', '#03c', '#08c']}}, yaxis: { min: 0, autoscaleMargin: 0.25, autoscaleBottom:false }}},
+  RSSI : { name:'RSSI', regexp:/\[(?:RSSI|SS)\:(-?\d+)[^\s]*\]/i, value:'', duplicateInterval:3600, unit:'db', graph:1, graphOptions:{ legendLbl:'Signal strength', lines: { lineWidth:1 }, grid: { backgroundColor: {colors:['#000', '#03c', '#08c']}}, yaxis: { min:-99, max:-20 }, colors:['#0f0']}},
+  START : { name:'START', regexp:/\bSTART\b/i, value:'Started'}, //useful to track when a node comes online
+  //saved directly into node.type - valid values come from the exports.motes collection below
+  TYPE : { name:'TYPE', regexp:/\[(?:TYPE)\:(\w+)[^\s]*\]/i, value:'', duplicateInterval:3600, unit:'db', graph:1, graphOptions:{ legendLbl:'Signal strength', lines: { lineWidth:1 }, grid: { backgroundColor: {colors:['#000', '#03c', '#08c']}}, yaxis: { min:-99, max:-20 }, colors:['#0f0']}},
+  //RF Transmit Level (ex: X:31 is max transmit level with RFM69_ATC
+  X : { name:'TXLVL', regexp:/\bX\:(\d+)\b/i, value:'', duplicateInterval:3600, graph:1, graphOptions:{ legendLbl:'RFTX Level', lines: { lineWidth:1 }, yaxis: { min:0, max:32 }, colors:['#09c']}},
   //catchAll : { name:'CatchAll', regexp:/(\w+)\:(\w+)/i, value:''},
 };
 
@@ -123,6 +137,7 @@ exports.metrics = {
 //   serverExecute is an action meant to be executed only at the server side (ex sending an email when a condition is met), must be defined as a function
 //   Server side execution for events is recommended since you can have multiple clients and you don't want to trigger SMS messages from each one, instead only one SMS message should be sent when an event happens
 //   default out-of-box jquery mobile icons are listed here: https://api.jquerymobile.com/icons/
+// ******************************************************************************************************************************************
 exports.events = {
   motionAlert : { label:'Motion : Alert', icon:'audio', descr:'Alert sound when MOTION is detected', serverExecute:function(node) { if (node.metrics['M'] && node.metrics['M'].value == 'MOTION' && (Date.now() - new Date(node.metrics['M'].updated).getTime() < 2000)) { io.sockets.emit('PLAYSOUND', 'sounds/alert.wav'); }; } },
   mailboxAlert : { label:'Mailbox Open Alert!', icon:'audio', descr:'Message sound when mailbox is opened', serverExecute:function(node) { if (node.metrics['M'] && node.metrics['M'].value == 'MOTION' && (Date.now() - new Date(node.metrics['M'].updated).getTime() < 2000)) { io.sockets.emit('PLAYSOUND', 'sounds/incomingmessage.wav'); }; } },
@@ -220,7 +235,7 @@ exports.events = {
   sumpSMS : { label:'SumpPump : SMS (below 20cm)', icon:'comment', descr:'Send SMS if water < 20cm below surface', serverExecute:function(node) { if (node.metrics['CM'] && node.metrics['CM'].value < 20 && (Date.now() - new Date(node.metrics['CM'].updated).getTime() < 2000)) { sendSMS('SUMP PUMP ALERT', 'Water is only 20cm below surface and rising - [' + node._id + '] ' + node.label.replace(/\{.+\}/ig, '') + ' @ ' + new Date().toLocaleTimeString()); }; } },
 
   garageSMS : { label:'Garage : SMS', icon:'comment', descr:'Send SMS when garage is OPENING', serverExecute:function(node) { if (node.metrics['Status'] && (node.metrics['Status'].value.indexOf('OPENING')>-1) && (Date.now() - new Date(node.metrics['Status'].updated).getTime() < 2000)) { sendSMS('Garage event', 'Garage was opening on node : [' + node._id + ':' + node.label.replace(/\{.+\}/ig, '') + '] @ ' + new Date().toLocaleTimeString()); }; } },
-  garagePoll: { label:'Garage : POLL', icon:'comment', descr:'Poll Garage Status', nextSchedule:function(nodeAtScheduleTime) { return 30000; }, scheduledExecute:function(nodeAtScheduleTime) { db.findOne({ _id : nodeAtScheduleTime._id }, function (err, nodeRightNow) { if (nodeRightNow) { /*just emit a log the status to client(s)*/ io.sockets.emit('LOG', 'GARAGE POLL STATUS: ' + nodeRightNow.metrics['Status'].value ); } }); } },
+  garagePoll: { label:'Garage : POLL Status', icon:'comment', descr:'Poll Garage Status', nextSchedule:function(nodeAtScheduleTime) { return 30000; }, scheduledExecute:function(nodeAtScheduleTime) { db.findOne({ _id : nodeAtScheduleTime._id }, function (err, nodeRightNow) { if (nodeRightNow) { /*just emit a log the status to client(s)*/ io.sockets.emit('LOG', 'GARAGE POLL STATUS: ' + nodeRightNow.metrics['Status'].value ); } }); } },
   
   garageSnapshotEmail : { label:'Garage : Snapshot', icon:'camera', descr:'Send IPCam snapshot when garage is OPENING',
     serverExecute: function(node) { 
@@ -301,6 +316,7 @@ exports.events = {
 //           The 'action' property is a string message that will be sent to that node when the control is clicked
 //           The 'serverExecute' property is a server side function that if defined, will be called when the control is clicked (ie it can do anything like triggering an HTTP request like in the case of an IP thermostat)
 //           The 'breakAfter' property, if set to 'true', will insert a page break after the control it's specified for. This is useful for nodes that have many of controls, to break them apart on the page
+// ******************************************************************************************************************************************
 exports.motes = {
   DoorBellMote: {
     label  : 'DoorBell',
@@ -311,11 +327,10 @@ exports.motes = {
                                       { label:'Enabled',  action:'BELL:0', css:'background-color:#9BFFBE;color:#000000', icon:'fa-bell', condition:''+function(node) { return node.metrics['Status']==null || node.metrics['Status'].value == 'ON'; }}]},
     },
   },
-
   GarageMote : {
-    label   : 'Garage Opener',
-    icon : 'icon_garage.png',
-    settings: { ipcam_snapURL: '' },
+    label    : 'Garage Opener',
+    icon     : 'icon_garage.png',
+    settings : { ipcam_snapURL: '' },
     controls : { refresh : { states: [{ label:'Refresh', action:'STS', icon:'refresh' }]},
                  opencls : { states: [{ label:'Open!', action:'OPN', icon:'arrow-u', css:'background-color:#FF9B9B;', condition:''+function(node) { return node.metrics['Status']!=null && node.metrics['Status'].value == 'CLOSED';}},
                                       { label:'Opening..', action:'', icon:'forbidden', css:'background-color:#FFF000;', condition:''+function(node) { return node.metrics['Status']!=null && node.metrics['Status'].value == 'OPENING';}},
@@ -346,9 +361,10 @@ exports.motes = {
                                 { label:'B2 (on)',  action:'BTN2:0', css:'background-color:#9BFFBE;color:#000000', icon:'power', condition:''+function(node) { return node.metrics['B2'] ? node.metrics['B2'].value == 'ON' : false; }}],
                        showCondition:''+function(node) { return (node.metrics && $.inArray('B2', Object.keys(node.metrics))>-1);}},
                },
+    settings: { ipcam_snapURL: '' }, //blank will make it inherit setting value from global settings.json, a specific value overrides the general setting, user can always choose his own setting in the UI
   },
   SonarMote: {
-    label  : 'Distance Sensor',
+    label  : 'Sonar Mote (Distance Sensor)',
     icon   : 'icon_sonar.png',
     settings: { lowVoltageValue: '' }, //blank will make it inherit from global settings.json lowVoltageValue, a specific value overrides the general setting, user can always choose his own setting in the UI
   },
@@ -389,8 +405,8 @@ exports.motes = {
   },
 
   RadioThermostat: { //for Radio Thermostat CT50
-    label  : 'Thermostat (WiFi)',
-    icon   : 'icon_thermostat.png',
+    label  : 'Thermostat (CT-50)',
+    icon   : 'icon_thermostat_ct50.png',
     controls : {
       //decrease target temperature by 1°
       COOLER : { states: [{ label:'Cooler', action:'', icon:'fa-chevron-down', //css:'background-color:#0077ff;color:#fff',
@@ -582,8 +598,21 @@ exports.motes = {
 //                                            GENERAL HELPER FUNCTIONS
 // ******************************************************************************************************************************************
 exports.ONEDAY = 86400000;
+
 exports.isNumeric =  function(n) {
   return !isNaN(parseFloat(n)) && isFinite(n); //http://stackoverflow.com/questions/18082/validate-decimal-numbers-in-javascript-isnumeric/1830844#1830844
+}
+
+//validate ipv4/ipv6/hostname/word - test here: http://jsfiddle.net/AJEzQ/
+exports.isValidIP = function(str) {
+  //IPs only:
+  return /((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))\s*$)|(^\s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?\s*$))/.test(str);
+  //IPs/hostnames/alphanumeric: return /^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$|^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*([A-Za-z]|[A-Za-z][A-Za-z0-9\-]*[A-Za-z0-9])$|^\s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?\s*$/.test(str);
+}
+
+//a numeric ID (for RF nodes), or a valid IPV4/IPV6/host
+exports.isValidNodeId = function(id) {
+  return (exports.isNumeric(id) || exports.isValidIP(id));
 }
 
 //extracts the value of a given metric based on the regular expression and any valuation function defined for that metric
@@ -633,14 +662,14 @@ exports.millisToFutureDate = function(futureDate, failSafe) {
 }
 
 // ******************************************************************************************************************************************
-//                                            RADIO THERMOSTAT SPECIFIC HELPER FUNCTIONS
+//                                            RADIO THERMOSTAT SPECIFIC HELPER FUNCTIONS 
 // ******************************************************************************************************************************************
-// *** these are implemented for Radio Thermostat CT50
+// *** these are implemented for Radio Thermostat model CT50
 // ******************************************************************************************************************************************
 //this function sends an HTTP GET request to the thermostat to refresh metrics like current temperature, target temp, mode (heat/cool), hold etc.
 exports.tstatPoll = function(nodeId) {
   db.findOne({ _id : nodeId }, function (err, dbNode) {
-    var thermostatIP = dbNode.settings && dbNode.settings.ip ? dbNode.settings.ip : (exports.motes[dbNode.type].settings.ip || settings.radiothermostat.ip.value);
+    var thermostatIP = dbNode.settings && dbNode.settings.ip ? dbNode.settings.ip : settings.radiothermostat.ip.value;
     var requestJson = 'http://'+thermostatIP+'/tstat';
     request(requestJson, function (error, response, body) {
       if (!error && response.statusCode == 200) {
@@ -659,7 +688,7 @@ exports.tstatPoll = function(nodeId) {
 exports.tstatRequest = function(thejson, nodeId) {
   //console.log('tstatRequest:' + JSON.stringify(thejson));
   db.findOne({ _id : nodeId }, function (err, dbNode) {
-    var thermostatIP = dbNode.settings && dbNode.settings.ip ? dbNode.settings.ip : (exports.motes[dbNode.type].settings.ip || settings.radiothermostat.ip.value);
+    var thermostatIP = dbNode.settings && dbNode.settings.ip ? dbNode.settings.ip : settings.radiothermostat.ip.value;
     request.post({ url:'http://'+thermostatIP+'/tstat', json: thejson},
               function(error,response,body){
                 //console.log('BODY: ' + JSON.stringify(body));

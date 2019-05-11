@@ -20,6 +20,13 @@ echo -e "${GRN}#################################################################
 echo -e "${YLW}Note: script can take long on older Pis${NC}"
 echo -e "${YLW}Note: setup requires your input at certain steps${NC}"
 
+if (whiptail --title "  Gateway User License Agreement  " --yesno "This software requires a license for any commercial use.\n\nBy installing this software I certify that either:\n\n- I use this software for personal/non-profit purposes\n- I have obtained a commercial license already" 12 78) then
+  echo -e "${GRN}#                 LICENSE confirmation applied.                #${NC}"
+else
+  echo -e "${RED}#                 License required, exiting.                #${NC}"
+  exit 0
+fi
+
 # #update apt-get, distribution, kernel
 echo -e "${CYAN}************* STEP: Running apt-get update *************${NC}"
 sudo apt-get update -m
@@ -84,7 +91,7 @@ sudo apt-get -y install php-common php-cli php-fpm
 # fi
 
 #install latest NodeJS --- https://www.raspberrypi.org/forums/viewtopic.php?t=141770
-sudo wget -O - https://raw.githubusercontent.com/audstanley/NodeJs-Raspberry-Pi/master/Install-Node.sh | sudo bash
+sudo wget -O - https://raw.githubusercontent.com/LowPowerLab/RaspberryPi-Gateway/master/.setup/Install-Node.sh | sudo bash
 
 echo -e "${CYAN}************* STEP: Setup Gateway app & dependencies *************${NC}"
 sudo mkdir -p $APPSRVDIR    #main dir where gateway app lives
@@ -110,13 +117,17 @@ sudo mkdir $APPSRVDIR/data/secure -p
 sudo openssl req -new -x509 -nodes -days 1825 -newkey rsa:2048 -out $APPSRVDIR/data/secure/server.crt -keyout $APPSRVDIR/data/secure/server.key -subj "/C=US/ST=MI/L=Detroit/O=LowPowerLab/OU=IoT Department/CN=lowpowerlab.com"
 sudo chown -R pi:pi $APPSRVDIR
 
+#create uploads dir for user icons
+sudo mkdir $APPSRVDIR/www/images/uploads -p
+sudo chown -R www-data:pi $APPSRVDIR/www/images/uploads
+
 #create HTTP AUTH credentials
 echo -e "${CYAN}************* STEP: Create HTTP AUTH credentials *************${NC}"
 HTTPUSER=$(whiptail --inputbox "\nEnter the Gateway http_auth username:" 8 78 "pi" --title "Gateway HTTP_AUTH Setup" --nocancel 3>&1 1>&2 2>&3)
 HTTPPASS=$(whiptail --inputbox "\nEnter the Gateway http_auth password:" 10 78 "raspberry" --title "Gateway HTTP_AUTH Setup" --nocancel 3>&1 1>&2 2>&3)
 touch $APPSRVDIR/data/secure/.htpasswd
 htpasswd -b $APPSRVDIR/data/secure/.htpasswd $HTTPUSER $HTTPPASS
-echo -e "You can change httpauth password using ${YLW}htpassword $APPSRVDIR/data/secure/.htpasswd user newpassword${NC}"
+echo -e "You can change httpauth password using ${YLW}htpasswd $APPSRVDIR/data/secure/.htpasswd user newpassword${NC}"
 
 echo -e "${CYAN}************* STEP: Copy default site config to sites-available *************${NC}"
 cp -rf $APPSRVDIR/.setup/default /etc/nginx/sites-available/default
